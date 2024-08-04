@@ -1,4 +1,4 @@
-# koishi-plugin-offline-check
+# @kxy051/koishi-plugin-offline-check
 
 [![npm](https://img.shields.io/npm/v/@kxy051/koishi-plugin-offline-check?style=flat-square)](https://www.npmjs.com/package/@kxy051/koishi-plugin-offline-check)
 
