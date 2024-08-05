@@ -1,10 +1,7 @@
-// 导入 Context 和 Schema 类
 import { Context, Schema } from "koishi";
 
-// 声明插件名称
 export const name = "offline-check";
 
-// 声明配置接口
 export interface Config {
     checkbot: {
         platform: string;
@@ -15,42 +12,38 @@ export interface Config {
         selfId: string;
         channelId: string;
     };
+    notifyInterval: number;
+    maxReconnectAttempts: number;
 }
 
-// 声明配置验证器
 export const Config: Schema<Config> = Schema.object({
     checkbot: Schema.object({
-        platform: Schema.string().required().description("检查的机器人平台"),
-        selfId: Schema.string().required().description("检查的机器人 SelfId"),
-    }),
+        platform: Schema.string().required().description("机器人平台"),
+        selfId: Schema.string().required().description("机器人 SelfId"),
+    }).description("受检机器人"),
     messagebot: Schema.object({
-        platform: Schema.string()
-            .required()
-            .description("发送消息的机器人平台"),
-        selfId: Schema.string()
-            .required()
-            .description("发送消息的机器人 SelfId"),
+        platform: Schema.string().required().description("机器人平台"),
+        selfId: Schema.string().required().description("机器人 SelfId"),
         channelId: Schema.string().required().description("发送消息的频道"),
-    }),
+    }).description("检查机器人"),
+    notifyInterval: Schema.number().default(60000).description("通知间隔时间，单位为毫秒"),
+    maxReconnectAttempts: Schema.number().default(3).description("最大重连尝试次数"),
 });
 
-// 应用插件
-export function apply(ctx: Context, config: Config) {
-    // 监听登录更新事件
+export async function apply(ctx: Context, config: Config) {
+    const { checkbot, messagebot, notifyInterval, maxReconnectAttempts } = config;
+    const { platform: cp, selfId: cs } = checkbot;
+    const { platform: mp, selfId: ms, channelId: mc } = messagebot;
+
+    let lastNotifyTime = 0;
+    let pendingNotifications: Map<string, string> = new Map();
+    let reconnectAttempts: Map<string, number> = new Map();
+
     ctx.on("login-updated", async ({ bot }) => {
-        // 判断登录信息是否与配置中的 checkbot 信息相符
-        if (
-            config.checkbot.selfId === bot.selfId &&
-            config.checkbot.platform === bot.platform
-        ) {
-            /**
-             *  OFFLINE = 0,
-             *  ONLINE = 1,
-             *  CONNECT = 2,
-             *  DISCONNECT = 3,
-             *  RECONECT = 4,
-             */
-            let statusText: string[] = [
+        const currentTime = Date.now();
+
+        if (cs === bot.selfId && cp === bot.platform) {
+            const statusText = [
                 "当前离线",
                 "当前在线",
                 "已连接至服务器",
@@ -59,46 +52,40 @@ export function apply(ctx: Context, config: Config) {
                 "状态未知",
             ];
 
-            // 判断状态是否需要发送消息
-            if (bot.status == 1 || bot.status == 0 || bot.status == 4) {
-                ctx.bots[
-                    `${config.messagebot.platform}:${config.messagebot.selfId}`
-                ].sendMessage(
-                    config.messagebot.channelId,
-                    `${bot.platform} 平台的 ${bot.user.name} 机器人${
-                        statusText[bot.status]
-                    }`
-                );
+            pendingNotifications.set(bot.user.name, `${bot.platform} 平台的 ${bot.user.name} 机器人${statusText[bot.status]}`);
+
+            if (currentTime - lastNotifyTime > notifyInterval) {
+                for (const notification of pendingNotifications.values()) {
+                    ctx.bots[`${mp}:${ms}`].sendMessage(mc, notification);
+                }
+                pendingNotifications.clear();
+                lastNotifyTime = currentTime;
             }
-            // 判断状态是否需要重启
+
             if (bot.status == 3 || bot.status == 0) {
                 await ctx.sleep(5000);
                 if (bot.status == 3 || bot.status == 0) {
-                    ctx.bots[
-                        `${config.messagebot.platform}:${config.messagebot.selfId}`
-                    ].sendMessage(config.messagebot.channelId, `正在尝试重连`);
-                    ctx.bots[
-                        `${config.checkbot.platform}:${config.checkbot.selfId}`
-                    ].start();
+                    const attemptKey = `${cp}:${cs}`;
+                    const attempts = reconnectAttempts.get(attemptKey) || 0;
+
+                    if (attempts < maxReconnectAttempts) {
+                        ctx.bots[`${mp}:${ms}`].sendMessage(mc, `正在尝试重连`);
+                        ctx.bots[`${cp}:${cs}`].start();
+                        reconnectAttempts.set(attemptKey, attempts + 1);
+                    } else {
+                        ctx.bots[`${mp}:${ms}`].sendMessage(mc, `重连尝试失败已达到最大次数，停止重连`);
+                    }
                 }
             }
-            // 判断状态是否需要重新加载
+
             if (bot.status == 4) {
                 await ctx.sleep(60000);
                 if (bot.status == 4) {
-                    ctx.bots[
-                        `${config.messagebot.platform}:${config.messagebot.selfId}`
-                    ].sendMessage(
-                        config.messagebot.channelId,
-                        `机器人重连失败，正在重启`
-                    );
-                    ctx.bots[
-                        `${config.checkbot.platform}:${config.checkbot.selfId}`
-                    ].stop();
+                    ctx.bots[`${mp}:${ms}`].sendMessage(mc, `机器人重连失败，正在重启`);
+                    ctx.bots[`${cp}:${cs}`].stop();
                     await ctx.sleep(3000);
-                    ctx.bots[
-                        `${config.checkbot.platform}:${config.checkbot.selfId}`
-                    ].start();
+                    ctx.bots[`${cp}:${cs}`].start();
+                    reconnectAttempts.set(`${cp}:${cs}`, 0);
                 }
             }
         }
