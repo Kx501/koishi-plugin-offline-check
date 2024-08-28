@@ -1,6 +1,8 @@
-import { Context, Schema, h, sleep } from "koishi";
+import { Context, Logger, Schema, h, sleep } from "koishi";
 
 export const name = "offline-check";
+
+export const log = new Logger('offline-check');
 
 export interface Config {
     checkbot: {
@@ -47,7 +49,7 @@ export function apply(ctx: Context, config: Config) {
         try {
             await ctx.bots[`${mp}:${ms}`].sendMessage(mc, msgCol);
         } catch (error) {
-            ctx.logger("offline-check").error(`Failed to send notification: ${error.message}`);
+            log.error(`Failed to send notification: ${error.message}`);
         }
         pendingNotifications.clear();
         lastNotifyTime = Date.now();
@@ -110,7 +112,7 @@ export function apply(ctx: Context, config: Config) {
                     }
                 }
             } catch (error) {
-                ctx.logger("offline-check").error(`Error handling login-updated event: ${error.message}`);
+                log.error(`Error handling login-updated event: ${error.message}`);
             }
         }
     });
